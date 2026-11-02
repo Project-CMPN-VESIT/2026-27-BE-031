@@ -16,19 +16,31 @@ data class HazardEvent(
     val label: String? = null
 ) {
     fun toSpeechText(): String = when (type) {
-        HazardType.FIRE -> "Fire detected ${position.toDescription()}."
-        HazardType.VEHICLE -> "Vehicle ${position.toDescription()}."
-        HazardType.SHARP_OBJECT -> when {
-            isInPath -> "Sharp object directly in your path."
-            else -> "A sharp object is ${position.toDescription()}."
+        HazardType.FIRE -> {
+            val name = label?.replaceFirstChar { it.uppercase() } ?: "Fire"
+            when {
+                isInPath -> "$name ahead."
+                else -> "$name ${position.toDescription()}."
+            }
+        }
+        HazardType.SHARP_OBJECT -> {
+            val name = label?.replaceFirstChar { it.uppercase() } ?: "Sharp object"
+            when {
+                isInPath -> "$name ahead."
+                else -> "$name ${position.toDescription()}."
+            }
+        }
+        HazardType.VEHICLE -> {
+            val name = label?.replaceFirstChar { it.uppercase() } ?: "Vehicle"
+            "$name ${position.toDescription()}."
         }
         HazardType.STAIRS -> when {
             isInPath -> "Stairs begin ahead."
-            else -> "Stairs are ${position.toDescription()}."
+            else -> "Stairs ${position.toDescription()}."
         }
         HazardType.OBSTACLE_IN_PATH -> {
-            val name = label ?: "Obstacle"
-            "${name.replaceFirstChar { it.uppercase() }} directly ahead."
+            val name = label?.replaceFirstChar { it.uppercase() } ?: "Obstacle"
+            "$name directly ahead."
         }
         HazardType.BICYCLE -> "Bicycle ${position.toDescription()}."
         HazardType.PERSON_APPROACHING -> "A person is approaching from ${position.toDescription()}."
@@ -40,19 +52,19 @@ data class HazardEvent(
 
 enum class HazardType(val priority: Int) {
     FIRE(100),
+    SHARP_OBJECT(100),   // Same critical priority as fire — knives/blades are life-safety
     VEHICLE(95),
     OBSTACLE_IN_PATH(90),
     STAIRS(80),
-    SHARP_OBJECT(75),
     BICYCLE(70),
     PERSON_APPROACHING(65),
     UNKNOWN(50);
 
     companion object {
         fun fromLabel(label: String): HazardType? = when (label.lowercase()) {
-            "fire", "flame" -> FIRE
+            "fire", "flame", "oven", "toaster" -> FIRE
+            "knife", "scissors", "blade", "cutter" -> SHARP_OBJECT
             "car", "truck", "bus", "motorcycle", "vehicle" -> VEHICLE
-            "knife", "scissors" -> SHARP_OBJECT
             "stairs", "staircase", "steps" -> STAIRS
             "bicycle", "bike" -> BICYCLE
             else -> null

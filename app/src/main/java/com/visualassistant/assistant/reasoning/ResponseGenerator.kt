@@ -109,13 +109,22 @@ class ResponseGenerator {
 
     /**
      * Generate hazard warning with actionable safety guidance.
+     *
+     * For life-safety hazards (FIRE, SHARP_OBJECT): speak the label clearly, once, no extra instructions.
+     * For path obstacles (OBSTACLE_IN_PATH): suggest left/right if available.
      */
     fun generateHazardWarning(hazard: HazardEvent, world: WorldModel): String {
         val baseText = hazard.toSpeechText()
+
+        // Critical life-safety hazards: just the clear label, no directions appended
+        if (hazard.type == com.visualassistant.perception.hazard.HazardType.FIRE ||
+            hazard.type == com.visualassistant.perception.hazard.HazardType.SHARP_OBJECT) {
+            return baseText
+        }
+
         if (!hazard.isInPath) return baseText
 
-        // If hazard is in path, suggest a safe direction
-        // Check if left/right are generally clear (no very close objects)
+        // For path obstacles, suggest a safe direction
         val isLeftClear = world.objectsOnLeft.none { it.distanceCategory == DistanceCategory.VERY_CLOSE }
         val isRightClear = world.objectsOnRight.none { it.distanceCategory == DistanceCategory.VERY_CLOSE }
 

@@ -136,16 +136,21 @@ class AssistantEngine(
         if (hazards.isNotEmpty()) {
             val topHazard = hazards.maxByOrNull { it.type.priority }!!
             val key = "hazard_${topHazard.type.name}_${topHazard.position.name}"
-            if (canAnnounce(key, 8000L)) {
-                val hazardPriority = priorityEngine.computeHazardPriority(topHazard)
+
+            // Life-safety hazards (knife, fire) announced once — 60s cooldown so they don't repeat
+            val isCriticalDanger = topHazard.type == com.visualassistant.perception.hazard.HazardType.SHARP_OBJECT ||
+                    topHazard.type == com.visualassistant.perception.hazard.HazardType.FIRE
+            val cooldown = if (isCriticalDanger) 60_000L else 8000L
+
+            if (canAnnounce(key, cooldown)) {
                 val hazardText = responseGenerator.generateHazardWarning(topHazard, worldModel)
                 ttsManager.speak(
                     SpeechEvent(
                         text = hazardText,
-                        priority = hazardPriority,
+                        priority = Priority.CRITICAL,   // Always CRITICAL for any hazard
                         cooldownKey = key,
-                        cooldownMs = 8000L,
-                        shouldInterrupt = hazardPriority == Priority.CRITICAL
+                        cooldownMs = cooldown,
+                        shouldInterrupt = true          // Always interrupt — safety first
                     )
                 )
                 markAnnounced(key)
