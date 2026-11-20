@@ -97,7 +97,7 @@ class TaskManager {
     fun advanceSearchState(timeSinceLastAnnounceMs: Long): String? {
         val now = System.currentTimeMillis()
         // Don't announce too frequently
-        if (now - _lastSearchAnnounceMs < 4000L) return null
+        if (now - _lastSearchAnnounceMs < 10_000L) return null
         _lastSearchAnnounceMs = now
 
         return when (_searchState) {

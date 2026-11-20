@@ -146,19 +146,23 @@ class IntentParser {
             return UserIntent.CheckForPeople
         }
 
+        // ── Find object (handles multi-word objects like "water bottle", "cell phone") ───
+        val findMatch = Regex("""(?:can you locate|can you find|can you see|do you see|is there a|is there an|is there any|where is|wheres|find|locate|search for|look for|what is on the)\s+(?:a\s+|an\s+|the\s+|my\s+)?([a-z\s]+)""")
+            .find(clean)
+        if (findMatch != null) {
+            val raw = findMatch.groupValues[1].trim()
+                .removeSuffix(" please")
+                .removeSuffix(" here")
+                .removeSuffix(" around")
+                .trim()
+            if (raw.length > 2 && raw !in setOf("me", "my", "the", "this", "that")) {
+                return UserIntent.FindObject(raw)
+            }
+        }
+
         // ── Specific table/surface check ──────────────────────────────────────────
         if (clean.contains("table") || clean.contains("desk")) {
             return UserIntent.FindObject("table")
-        }
-
-        // ── Find generic object ───────────────────────────────────────────────────
-        val findMatch = Regex("""(?:find|locate|where is|wheres|can you see|what is on the)\s+(?:a\s+|the\s+)?(\w+)""")
-            .find(clean)
-        if (findMatch != null) {
-            val objectLabel = findMatch.groupValues[1]
-            if (objectLabel.length > 2 && objectLabel !in setOf("me", "my", "the", "this")) {
-                return UserIntent.FindObject(objectLabel)
-            }
         }
 
         // ── Guide to object ───────────────────────────────────────────────────────

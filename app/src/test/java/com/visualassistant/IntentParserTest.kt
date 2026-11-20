@@ -118,6 +118,14 @@ class IntentParserTest {
         val intent = parser.parse("where is the door")
         // Should map to FindObject or GuideToExit depending on context
         assertTrue(intent is UserIntent.FindObject || intent is UserIntent.GuideToExit)
+
+        val waterBottleIntent = parser.parse("can you locate a water bottle")
+        assertTrue(waterBottleIntent is UserIntent.FindObject)
+        assertEquals("water bottle", (waterBottleIntent as UserIntent.FindObject).label)
+
+        val knifeIntent = parser.parse("where is the knife")
+        assertTrue(knifeIntent is UserIntent.FindObject)
+        assertEquals("knife", (knifeIntent as UserIntent.FindObject).label)
     }
 
     @Test

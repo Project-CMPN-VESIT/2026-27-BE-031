@@ -229,11 +229,14 @@ class ResponseGenerator {
         }
     }
 
-    private fun findObject(label: String, world: WorldModel, memory: SpatialMemory): String {
+    fun findObject(label: String, world: WorldModel, memory: SpatialMemory): String {
         // Check current view first
         val found = world.findFirst(label)
         if (found != null) {
-            return "Yes. There is a ${found.label} ${found.position.toDescription()}, ${found.lastDetectedObject.distanceDescription}."
+            val surface = findSupportingSurface(found, world.trackedObjects)
+            val surfaceStr = if (surface != null) " $surface" else ""
+            val display = displayLabel(found.label)
+            return "Yes. There is a $display$surfaceStr ${found.position.toDescription()}, ${found.lastDetectedObject.distanceDescription}."
         }
 
         // Check memory
@@ -325,6 +328,61 @@ class ResponseGenerator {
                 "Caution. ${label.replaceFirstChar { it.uppercase() }} very close $pos"
             else -> "A $label is $pos"
         }
+    }
+
+    private fun displayLabel(label: String): String = when (label.lowercase()) {
+        "dining table" -> "table"
+        "cell phone" -> "phone"
+        else -> label
+    }
+
+    private fun findSupportingSurface(obj: TrackedObject, allObjects: List<TrackedObject>): String? {
+        val boxA = obj.lastDetectedObject.boundingBox
+
+        for (other in allObjects) {
+            if (other.id == obj.id) continue
+            val label = other.label.lowercase()
+            val isSurface = label in setOf("dining table", "table", "desk", "counter", "couch", "sofa", "bed", "chair", "sink", "bench")
+            if (!isSurface) continue
+
+            val boxS = other.lastDetectedObject.boundingBox
+            val horizontalOverlap = maxOf(0f, minOf(boxA.right, boxS.right) - maxOf(boxA.left, boxS.left))
+            val verticalOverlap = maxOf0(00f, minOf(boxA.bottom, boxS.bottom) - maxOf(boxA.top, boxS.top))
+
+            val overlaps = (horizontalOverlap > 0.1f * boxA.width() && verticalOverlap > 0f) ||
+                    boxS.contains(boxA.centerX(), boxA.centerY()) ||
+                    (other.position == obj.position && boxA.top >= boxS.top - 0.25f && boxA.bottom <= boxS.bottom + 0.25f)
+
+            if (overlaps) {
+                return when {
+                    label.contains("table") || label.contains("desk") -> "on the desk"
+                    label.contains("couch") || label.contains("sofa") -> "on the couch"
+                    label.contains("bed") -> "on the bed"
+                    label.contains("chair") -> "on the chair"
+                    label.contains("sink") -> "in the sink"
+                    label.contains("counter") -> "on the counter"
+                    else -> "on the table"
+                }
+            }
+        }
+
+        val tableAtSamePos = allObjects.find { 
+            (it.label.contains("table", true) || it.label.contains("desk", true)) &&
+            it.position == obj.position
+        }
+        if (tableAtSamePos != null) {
+            return "on the desk"
+        }
+
+        val isTabletopItem = obj.label.lowercase() in setOf("knife", "scissors", "blade", "cutter", "fork", "bottle", "cup", "laptop", "mouse", "keyboard")
+        val hasTabletopContext = allObjects.any {
+            it.id != obj.id && it.label.lowercase() in setOf("dining table", "table", "desk", "laptop", "keyboard", "mouse", "cup", "book", "bottle")
+        }
+        if (isTabletopItem && (hasTabletopContext || obj.lastDetectedObject.centerY > 0.35f)) {
+            return "on the desk"
+        }
+
+        return null
     }
 
     private val lowPriorityObjects = setOf(

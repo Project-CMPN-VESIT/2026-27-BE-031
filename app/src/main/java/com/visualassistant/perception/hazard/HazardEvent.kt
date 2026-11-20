@@ -13,38 +13,42 @@ data class HazardEvent(
     val confidence: Float,
     val isInPath: Boolean,
     val timestampMs: Long = System.currentTimeMillis(),
-    val label: String? = null
+    val label: String? = null,
+    val surfaceContext: String? = null
 ) {
-    fun toSpeechText(): String = when (type) {
-        HazardType.FIRE -> {
-            val name = label?.replaceFirstChar { it.uppercase() } ?: "Fire"
-            when {
-                isInPath -> "$name ahead."
-                else -> "$name ${position.toDescription()}."
+    fun toSpeechText(): String {
+        val surfaceStr = if (!surfaceContext.isNullOrBlank()) " $surfaceContext" else ""
+        return when (type) {
+            HazardType.FIRE -> {
+                val name = label?.replaceFirstChar { it.uppercase() } ?: "Fire"
+                when {
+                    isInPath -> "$name$surfaceStr ahead."
+                    else -> "$name$surfaceStr ${position.toDescription()}."
+                }
             }
-        }
-        HazardType.SHARP_OBJECT -> {
-            val name = label?.replaceFirstChar { it.uppercase() } ?: "Sharp object"
-            when {
-                isInPath -> "$name ahead."
-                else -> "$name ${position.toDescription()}."
+            HazardType.SHARP_OBJECT -> {
+                val name = label?.replaceFirstChar { it.uppercase() } ?: "Sharp object"
+                when {
+                    isInPath -> "$name$surfaceStr ahead."
+                    else -> "$name$surfaceStr ${position.toDescription()}."
+                }
             }
+            HazardType.VEHICLE -> {
+                val name = label?.replaceFirstChar { it.uppercase() } ?: "Vehicle"
+                "$name ${position.toDescription()}."
+            }
+            HazardType.STAIRS -> when {
+                isInPath -> "Stairs begin ahead."
+                else -> "Stairs ${position.toDescription()}."
+            }
+            HazardType.OBSTACLE_IN_PATH -> {
+                val name = label?.replaceFirstChar { it.uppercase() } ?: "Obstacle"
+                "$name$surfaceStr directly ahead."
+            }
+            HazardType.BICYCLE -> "Bicycle ${position.toDescription()}."
+            HazardType.PERSON_APPROACHING -> "A person is approaching from ${position.toDescription()}."
+            HazardType.UNKNOWN -> "Potential hazard ${position.toDescription()}."
         }
-        HazardType.VEHICLE -> {
-            val name = label?.replaceFirstChar { it.uppercase() } ?: "Vehicle"
-            "$name ${position.toDescription()}."
-        }
-        HazardType.STAIRS -> when {
-            isInPath -> "Stairs begin ahead."
-            else -> "Stairs ${position.toDescription()}."
-        }
-        HazardType.OBSTACLE_IN_PATH -> {
-            val name = label?.replaceFirstChar { it.uppercase() } ?: "Obstacle"
-            "$name directly ahead."
-        }
-        HazardType.BICYCLE -> "Bicycle ${position.toDescription()}."
-        HazardType.PERSON_APPROACHING -> "A person is approaching from ${position.toDescription()}."
-        HazardType.UNKNOWN -> "Potential hazard ${position.toDescription()}."
     }
 
     fun priority(): Int = type.priority

@@ -138,6 +138,28 @@ class VisualAssistantViewModel(application: Application) : AndroidViewModel(appl
                 ttsManager.speakNow("I don't have a clear view right now.")
             }
         }
+
+        assistantEngine.onCloudFindRequested = { targetLabel ->
+            val frame = lastFrame
+            if (frame != null) {
+                viewModelScope.launch(Dispatchers.Main) {
+                    val prompt = "The user is a visually impaired person asking: 'Can you locate a $targetLabel?'. " +
+                            "Analyze this camera frame carefully. Do you see a $targetLabel? " +
+                            "If yes, describe where it is simply and concisely (for example: 'The $targetLabel is on the table directly ahead' or 'The $targetLabel is to your right'). " +
+                            "If no, say 'I cannot see a $targetLabel here.' " +
+                            "Keep your response to one or two short sentences."
+                    val result = cloudVisionService.describeImage(frame, prompt)
+                    if (result != null) {
+                        ttsManager.speakNow(result)
+                        _statusText.value = result
+                    } else {
+                        ttsManager.speakNow("I can't currently see a $targetLabel from this direction.")
+                    }
+                }
+            } else {
+                ttsManager.speakNow("I don't have a clear camera view right now.")
+            }
+        }
     }
 
     /**

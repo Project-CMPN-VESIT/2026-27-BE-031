@@ -40,9 +40,24 @@ data class WorldModel(
     /** Objects that are approaching */
     val approachingObjects: List<TrackedObject> get() = trackedObjects.filter { it.isApproaching }
 
-    /** Find objects by label (case-insensitive) */
-    fun findByLabel(label: String): List<TrackedObject> =
-        trackedObjects.filter { it.label.equals(label, ignoreCase = true) }
+    /** Find objects by label (case-insensitive, with synonym and partial matching) */
+    fun findByLabel(query: String): List<TrackedObject> {
+        val q = query.trim().lowercase()
+        return trackedObjects.filter { obj ->
+            val l = obj.label.lowercase()
+            l == q ||
+            (q.contains("water") && l == "bottle") ||
+            (q.contains("bottle") && l == "bottle") ||
+            (q.contains("phone") && l == "cell phone") ||
+            (q.contains("table") && (l == "dining table" || l == "desk")) ||
+            (q.contains("desk") && (l == "dining table" || l == "desk")) ||
+            (q.contains("knife") && (l == "knife" || l == "blade" || l == "cutter")) ||
+            (q.contains("computer") && l == "laptop") ||
+            (q.contains("tv") && (l == "tv" || l == "monitor")) ||
+            (q.contains("glass") && (l == "wine glass" || l == "cup")) ||
+            l.contains(q) || q.contains(l)
+        }
+    }
 
     /** Find first object of a given label */
     fun findFirst(label: String): TrackedObject? = findByLabel(label).firstOrNull()

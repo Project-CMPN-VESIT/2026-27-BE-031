@@ -69,6 +69,7 @@ class AssistantEngine(
     }
 
     var onCloudDescriptionRequested: (() -> Unit)? = null
+    var onCloudFindRequested: ((String) -> Unit)? = null
 
     /**
      * Called when the user speaks a command.
@@ -85,7 +86,27 @@ class AssistantEngine(
         // Handle task-setting intents
         updateTaskFromIntent(intent)
 
-        // Generate response
+        // Handle FindObject intent with Cloud Fallback when offline model misses it
+        if (intent is UserIntent.FindObject) {
+            val found = currentWorldModel.findFirst(intent.label)
+            if (found != null) {
+                val resp = responseGenerator.findObject(intent.label, currentWorldModel, spatialMemory)
+                ttsManager.speakNow(resp)
+            } else {
+                // If cloud vision is configured, ask Gemini to locate it in the current view
+                if (onCloudFindRequested != null) {
+                    ttsManager.speakNow("Searching for ${intent.label}...")
+                    onCloudFindRequested?.invoke(intent.label)
+                } else {
+                    val resp = responseGenerator.findObject(intent.label, currentWorldModel, spatialMemory)
+                    ttsManager.speakNow(resp)
+                }
+            }
+            updateContextFromResponse(intent, currentWorldModel)
+            return
+        }
+
+        // Generate response for other intents
         val response = responseGenerator.generateResponse(
             intent = intent,
             world = currentWorldModel,
@@ -102,7 +123,7 @@ class AssistantEngine(
             ttsManager.speakNow(response)
         }
 
-        // Handle cloud fallback
+        // Handle cloud fallback for detailed description
         if (intent is UserIntent.DetailedDescription) {
             onCloudDescriptionRequested?.invoke()
         }
@@ -184,7 +205,7 @@ class AssistantEngine(
                         System.currentTimeMillis() - (proactiveCooldownMap["task_search"] ?: 0L)
                     )
                     searchMsg?.let {
-                        ttsManager.speak(it, Priority.MEDIUM, "task_search_guidance", 4000L)
+                        ttsManager.speak(it, Priority.MEDIUM, "task_search_guidance", 10_000L)
                         markAnnounced("task_search")
                     }
                 }
@@ -198,7 +219,7 @@ class AssistantEngine(
                         System.currentTimeMillis() - (proactiveCooldownMap["task_search"] ?: 0L)
                     )
                     searchMsg?.let {
-                        ttsManager.speak(it, Priority.MEDIUM, "task_search_guidance", 4000L)
+                        ttsManager.speak(it, Priority.MEDIUM, "task_search_guidance", 10_000L)
                         markAnnounced("task_search")
                     }
                 }
@@ -246,8 +267,8 @@ class AssistantEngine(
         val narration = responseGenerator.generateProactiveNarration(prioritized, hazards, world)
         if (narration != null) {
             val key = "exploration_narration_${narration.take(20)}"
-            if (canAnnounce(key, 5000L)) {
-                ttsManager.speak(narration, Priority.HIGH, key, 5000L)
+            if (canAnnounce(key, 10_000L)) {
+                ttsManager.speak(narration, Priority.HIGH, key, 10_000L)
                 markAnnounced(key)
             }
         }
@@ -258,21 +279,21 @@ class AssistantEngine(
      */
     private fun announceNavigationTarget(obj: TrackedObject, targetLabel: String, task: NavigationTask) {
         val key = "nav_target_${targetLabel}_${obj.position.name}"
-        if (!canAnnounce(key, 4000L)) return
+        if (!canAnnounce(key, 10_000L)) return
 
         val distDesc = obj.lastDetectedObject.distanceDescription
         val posDesc = obj.position.toDescription()
 
         when (obj.lastDetectedObject.distanceCategory) {
             com.visualassistant.perception.object_detection.DistanceCategory.VERY_CLOSE -> {
-                ttsManager.speak("You've reached the $targetLabel.", Priority.CRITICAL, key, 5000L)
+                ttsManager.speak("You've reached the $targetLabel.", Priority.CRITICAL, key, 10_000L)
                 taskManager.markReached()
             }
             else -> {
                 val dirInstruction = obj.position.toDirectionInstruction()
                 ttsManager.speak(
                     "I can see the $targetLabel $posDesc, $distDesc. $dirInstruction.",
-                    Priority.HIGH, key, 4000L
+                    Priority.HIGH, key, 10_000L
                 )
             }
         }

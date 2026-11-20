@@ -13,9 +13,9 @@ object Constants {
     const val SCENE_ANALYSIS_INTERVAL_MS = 1000L        // 1 FPS
 
     // Speech cooldown (ms) — minimum time before repeating an event type
-    const val SPEECH_COOLDOWN_DEFAULT_MS = 5000L
-    const val SPEECH_COOLDOWN_HAZARD_MS = 3000L
-    const val SPEECH_COOLDOWN_NAVIGATION_MS = 2000L
+    const val SPEECH_COOLDOWN_DEFAULT_MS = 10_000L
+    const val SPEECH_COOLDOWN_HAZARD_MS = 10_000L
+    const val SPEECH_COOLDOWN_NAVIGATION_MS = 10_000L
 
     // Distance estimation thresholds (normalized, based on bbox height ratio)
     const val DISTANCE_VERY_CLOSE_THRESHOLD = 0.5f   // bbox occupies >50% of frame height → very close
