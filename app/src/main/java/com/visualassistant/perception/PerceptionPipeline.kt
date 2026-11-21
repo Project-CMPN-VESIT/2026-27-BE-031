@@ -35,6 +35,7 @@ class PerceptionPipeline(
     private val hazardDetector: HazardDetector,
     private val spatialMemory: SpatialMemory,
     private val scope: CoroutineScope,
+    private val isUserMovingProvider: () -> Boolean = { false },
     private val onWorldModelUpdated: (WorldModel) -> Unit
 ) {
     private val tracker = ObjectTracker()
@@ -88,23 +89,33 @@ class PerceptionPipeline(
                     textRegions = ocrProcessor.recognizeText(bitmap, bitmap.width, bitmap.height)
                     cachedTextRegions = textRegions
 
-                    // Auto-store room numbers in memory
-                    textRegions.filter { it.isRoomNumber }.forEach { region ->
-                        val nearbyElevator = trackedObjects.find { it.label.equals("elevator", ignoreCase = true) }
-                        spatialMemory.storeRoom(
-                            roomNumber = region.text,
-                            relativePosition = "ahead",
-                            nearbyLandmark = nearbyElevator?.label
-                        )
-                        Log.d(TAG, "Stored room in memory: ${region.text}")
-                    }
+                    // Process and passively remember detected signs and room numbers with spatial directions
+                    for (region in textRegions) {
+                        // Calculate relative position based on horizontal bounding box center
+                        // Mirroring aware: centerX > 0.65f -> left, < 0.35f -> right, else ahead
+                        val cx = region.boundingBox.centerX()
+                        val relPos = when {
+                            cx > 0.65f -> "to your left"
+                            cx < 0.35f -> "to your right"
+                            else -> "ahead"
+                        }
 
-                    // Auto-store landmarks
-                    textRegions.filter { it.isSign && !it.isRoomNumber }.forEach { region ->
-                        spatialMemory.storeLandmark(
-                            label = region.text.lowercase(),
-                            relativePosition = "ahead"
-                        )
+                        if (region.isRoomNumber) {
+                            val nearbyElevator = trackedObjects.find { it.label.equals("elevator", ignoreCase = true) }
+                            spatialMemory.storeRoom(
+                                roomNumber = region.text,
+                                relativePosition = relPos,
+                                nearbyLandmark = nearbyElevator?.label
+                            )
+                            Log.d(TAG, "Passively stored room in memory: ${region.text} ($relPos)")
+                        } else if (region.isSign) {
+                            // Store named place (library, cafeteria, restroom, etc.)
+                            spatialMemory.storePlace(
+                                name = region.text,
+                                relativePosition = relPos
+                            )
+                            Log.d(TAG, "Passively stored place in memory: ${region.text} ($relPos)")
+                        }
                     }
                 }
 
@@ -132,7 +143,8 @@ class PerceptionPipeline(
                             com.visualassistant.perception.hazard.HazardType.fromLabel(obj.label) != null
                         }
                     },
-                    navigationTargets = navTargets
+                    navigationTargets = navTargets,
+                    isUserMoving = isUserMovingProvider()
                 )
 
                 currentWorldModel = newWorldModel

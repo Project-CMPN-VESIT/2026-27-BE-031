@@ -16,6 +16,8 @@ object Constants {
     const val SPEECH_COOLDOWN_DEFAULT_MS = 10_000L
     const val SPEECH_COOLDOWN_HAZARD_MS = 10_000L
     const val SPEECH_COOLDOWN_NAVIGATION_MS = 10_000L
+    const val PROACTIVE_NARRATION_INTERVAL_MS = 12_000L
+    const val PROACTIVE_REPEAT_SAME_OBJECT_MS = 30_000L
 
     // Distance estimation thresholds (normalized, based on bbox height ratio)
     const val DISTANCE_VERY_CLOSE_THRESHOLD = 0.5f   // bbox occupies >50% of frame height → very close
@@ -57,8 +59,13 @@ object Constants {
     const val DEPTH_INPUT_HEIGHT = 256
 
     // Confidence thresholds
-    const val OBJECT_DETECTION_CONFIDENCE = 0.30f
-    const val HAZARD_CONFIDENCE = 0.25f   // Lower threshold for safety
+    // Lowered from 0.30 → 0.20: after letterbox fix, real objects score 0.18–0.35.
+    // 0.20 catches them without flooding with noise from the COCO background class.
+    const val OBJECT_DETECTION_CONFIDENCE = 0.20f
+    const val HAZARD_CONFIDENCE = 0.20f   // Lower threshold for safety
+
+    // NMS IoU threshold — boxes of the same class overlapping > 45% are merged
+    const val NMS_IOU_THRESHOLD = 0.45f
 
     // TTS speech rate
     const val TTS_SPEECH_RATE_DEFAULT = 0.9f

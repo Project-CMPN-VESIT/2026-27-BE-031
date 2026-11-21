@@ -79,11 +79,40 @@ class IntentParser {
             return UserIntent.GuideToRoom(roomGuideMatch.groupValues[1].uppercase())
         }
 
-        // ── Query Memory about room ───────────────────────────────────────────────
+        // ── Navigation & Directions (Maps API) ───────────────────────────────────
+        val navMatch = Regex("""(?:take me to|navigate to|directions to|how do i get to|how to reach|how to get to|route to)\s+(?:the\s+)?([a-z0-9\s]+)""")
+            .find(clean)
+        if (navMatch != null) {
+            val dest = navMatch.groupValues[1].trim()
+                .removeSuffix(" please")
+                .removeSuffix(" from here")
+                .trim()
+            when {
+                dest in setOf("exit", "the exit", "door", "the door") -> return UserIntent.GuideToExit
+                dest in setOf("elevator", "the elevator", "lift", "the lift") -> return UserIntent.GuideToElevator
+                dest in setOf("there", "it") -> return UserIntent.GuideToLastMentioned
+                dest.startsWith("room ") -> {
+                    val rm = dest.removePrefix("room ").trim().uppercase()
+                    return UserIntent.GuideToRoom(rm)
+                }
+                dest.matches(Regex("""\d{3,4}[A-Za-z]?""")) -> {
+                    return UserIntent.GuideToRoom(dest.uppercase())
+                }
+                dest.isNotEmpty() -> return UserIntent.NavigateTo(dest)
+            }
+        }
+
+        // ── Query Memory about room or known places ───────────────────────────────
         val roomQueryMatch = Regex("""(?:where is|where was|find|locate)\s+(?:room\s*)?([A-Za-z]?\d{3,4}[A-Za-z]?)""")
             .find(clean)
         if (roomQueryMatch != null) {
             return UserIntent.QueryMemory("room:${roomQueryMatch.groupValues[1].uppercase()}")
+        }
+
+        val placeMemoryQuery = Regex("""(?:where is|where was|where did i see|have you seen)\s+(?:the\s+)?(library|cafeteria|restroom|bathroom|reception|office|canteen|lab|gym)""")
+            .find(clean)
+        if (placeMemoryQuery != null) {
+            return UserIntent.QueryMemory(placeMemoryQuery.groupValues[1])
         }
 
         // ── Where did I see X (memory query) ────────────────────────────────────
@@ -101,7 +130,7 @@ class IntentParser {
         // ── Describe surroundings ("What's around me" / "whats around me") ─────────
         if (matchesAny(clean, listOf("what is around me", "whats around me", "around me", "around",
                 "what is around", "whats around", "describe my surroundings", "describe surroundings",
-                "what surrounds me", "what do you see", "look around", "describe everything",
+                "what surrounds me", "look around", "describe everything",
                 "what can you see", "what is near me", "whats near me"))) {
             return UserIntent.DescribeSurroundings
         }
@@ -109,7 +138,7 @@ class IntentParser {
         // ── Describe ahead / what is in front ────────────────────────────────────
         if (matchesAny(clean, listOf("what is in front of me", "whats in front of me", "in front of me",
                 "what is in front", "whats in front", "what is ahead", "whats ahead", "what is before me",
-                "whats before me", "describe what is in front", "ahead", "in front"))) {
+                "whats before me", "describe what is in front", "what do you see", "ahead", "in front"))) {
             return UserIntent.DescribeScene
         }
 

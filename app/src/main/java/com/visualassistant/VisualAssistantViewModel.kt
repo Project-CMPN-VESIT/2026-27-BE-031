@@ -8,8 +8,10 @@ import androidx.lifecycle.viewModelScope
 import com.visualassistant.assistant.AssistantEngine
 import com.visualassistant.camera.CameraManager
 import com.visualassistant.memory.SpatialMemory
+import com.visualassistant.navigation.MapsDirectionsService
 import com.visualassistant.perception.PerceptionPipeline
 import com.visualassistant.perception.hazard.HazardDetector
+import com.visualassistant.perception.motion.MotionDetector
 import com.visualassistant.perception.object_detection.ObjectDetector
 import com.visualassistant.perception.ocr.OCRProcessor
 import com.visualassistant.speech.speech_to_text.SpeechRecognitionManager
@@ -59,6 +61,8 @@ class VisualAssistantViewModel(application: Application) : AndroidViewModel(appl
     val ttsManager = TTSManager(application)
 
     private val spatialMemory = SpatialMemory(application)
+    val motionDetector = MotionDetector(application)
+    val mapsDirectionsService = MapsDirectionsService(application)
 
     val assistantEngine = AssistantEngine(
         context = application,
@@ -79,6 +83,7 @@ class VisualAssistantViewModel(application: Application) : AndroidViewModel(appl
         hazardDetector = hazardDetector,
         spatialMemory = spatialMemory,
         scope = viewModelScope,
+        isUserMovingProvider = { motionDetector.isUserMoving },
         onWorldModelUpdated = { worldModel ->
             _worldModel.value = worldModel
 
@@ -160,6 +165,15 @@ class VisualAssistantViewModel(application: Application) : AndroidViewModel(appl
                 ttsManager.speakNow("I don't have a clear camera view right now.")
             }
         }
+
+        assistantEngine.onNavigateRequested = { destination ->
+            viewModelScope.launch(Dispatchers.Main) {
+                ttsManager.speakNow("Looking up walking route to $destination...")
+                val summary = mapsDirectionsService.getDirections(destination)
+                ttsManager.speakNow(summary)
+                _statusText.value = summary
+            }
+        }
     }
 
     /**
@@ -178,6 +192,7 @@ class VisualAssistantViewModel(application: Application) : AndroidViewModel(appl
         _isAssistantActive.value = true
         _statusText.value = "Assistant active. Tap to speak."
         assistantEngine.start()
+        motionDetector.start()
         perceptionPipeline.reset()
         Log.d(TAG, "Assistant started")
     }
@@ -190,6 +205,7 @@ class VisualAssistantViewModel(application: Application) : AndroidViewModel(appl
         _statusText.value = "Press START to begin"
         _isListening.value = false
         assistantEngine.stop()
+        motionDetector.stop()
         if (::speechRecognitionManager.isInitialized) {
             speechRecognitionManager.stopListening()
         }
@@ -218,6 +234,7 @@ class VisualAssistantViewModel(application: Application) : AndroidViewModel(appl
     override fun onCleared() {
         super.onCleared()
         ttsManager.shutdown()
+        motionDetector.stop()
         objectDetector.close()
         ocrProcessor.close()
         if (::speechRecognitionManager.isInitialized) {

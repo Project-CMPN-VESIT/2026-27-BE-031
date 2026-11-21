@@ -13,7 +13,8 @@ data class WorldModel(
     val trackedObjects: List<TrackedObject> = emptyList(),
     val detectedText: List<TextRegion> = emptyList(),
     val hazards: List<TrackedObject> = emptyList(),
-    val navigationTargets: List<TrackedObject> = emptyList()
+    val navigationTargets: List<TrackedObject> = emptyList(),
+    val isUserMoving: Boolean = false
 ) {
 
     /** Whether there are any detected objects */

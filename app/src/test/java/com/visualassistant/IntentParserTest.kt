@@ -135,6 +135,30 @@ class IntentParserTest {
     }
 
     @Test
+    fun `parse query memory place`() {
+        val libraryIntent = parser.parse("where is the library")
+        assertTrue("Should map to QueryMemory or FindObject", libraryIntent is UserIntent.QueryMemory || libraryIntent is UserIntent.FindObject)
+
+        val cafeIntent = parser.parse("where was the cafeteria")
+        assertTrue("Should map to QueryMemory", cafeIntent is UserIntent.QueryMemory)
+    }
+
+    @Test
+    fun `parse navigate to destination`() {
+        val parkIntent = parser.parse("take me to central park")
+        assertTrue(parkIntent is UserIntent.NavigateTo)
+        assertEquals("central park", (parkIntent as UserIntent.NavigateTo).destination)
+
+        val cafeIntent = parser.parse("navigate to starbucks")
+        assertTrue(cafeIntent is UserIntent.NavigateTo)
+        assertEquals("starbucks", (cafeIntent as UserIntent.NavigateTo).destination)
+
+        val directionsIntent = parser.parse("how do i get to the city airport")
+        assertTrue(directionsIntent is UserIntent.NavigateTo)
+        assertEquals("city airport", (directionsIntent as UserIntent.NavigateTo).destination)
+    }
+
+    @Test
     fun `parse surroundings`() {
         val intent = parser.parse("what is around me")
         assertTrue(intent is UserIntent.DescribeSurroundings)

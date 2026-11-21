@@ -52,6 +52,9 @@ sealed class UserIntent {
     /** "Guide me to [object]." */
     data class GuideTo(val label: String) : UserIntent()
 
+    /** "Take me to [place]." / "Navigate to [place]." / "How do I get to [place]?" */
+    data class NavigateTo(val destination: String) : UserIntent()
+
     // ─── Mode commands ───────────────────────────────────────────────────────────
     /** "Start walking mode." / "I'm walking, help me navigate." */
     object StartWalkingMode : UserIntent()

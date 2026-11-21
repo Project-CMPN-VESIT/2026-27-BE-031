@@ -19,9 +19,77 @@ class SpatialMemory(context: Context) {
     // In-memory store: label → list of entries (most recent first)
     private val memoryMap = mutableMapOf<String, MutableList<MemoryEntry>>()
     private val roomMemory = mutableMapOf<String, MemoryEntry>()  // roomNumber → entry
+    private val placeMemory = mutableMapOf<String, MemoryEntry>() // placeName → entry
 
     // TODO: Room DB integration for persistence across sessions
     // private val db = MemoryDatabase.getDatabase(context)
+
+    /**
+     * Store a detected named place (e.g. "Library", "Cafeteria", "Restroom")
+     */
+    fun storePlace(
+        name: String,
+        relativePosition: String,
+        contextDescription: String? = null,
+        floor: Int? = null
+    ) {
+        val cleanName = name.trim()
+        val entry = MemoryEntry(
+            label = "place",
+            text = cleanName,
+            relativePosition = relativePosition,
+            contextDescription = contextDescription,
+            floor = floor,
+            timestampMs = System.currentTimeMillis()
+        )
+        val lowerKey = cleanName.lowercase()
+        placeMemory[lowerKey] = entry
+        storeLandmark(lowerKey, relativePosition, contextDescription, floor)
+
+        // Also index individual significant words (e.g., "Library" from "Central Library")
+        cleanName.split(Regex("\\s+")).forEach { word ->
+            val cleanWord = word.lowercase().trim()
+            if (cleanWord.length > 3 && cleanWord !in setOf("room", "hall", "near", "side")) {
+                placeMemory[cleanWord] = entry
+            }
+        }
+    }
+
+    /**
+     * Find a place by name or keyword using fuzzy / substring matching.
+     */
+    fun findPlace(query: String): MemoryEntry? {
+        val q = query.trim().lowercase()
+        // 1. Direct match in placeMemory
+        placeMemory[q]?.let { return it }
+
+        // 2. Substring match in placeMemory
+        val subMatch = placeMemory.entries.find { (key, entry) ->
+            key.contains(q) || q.contains(key) || (entry.text?.contains(q, ignoreCase = true) == true)
+        }
+        if (subMatch != null) return subMatch.value
+
+        // 3. Check room memory
+        val roomEntry = roomMemory[q.uppercase()] ?: roomMemory.entries.find { it.key.contains(q, ignoreCase = true) }?.value
+        if (roomEntry != null) return roomEntry
+
+        // 4. Fallback to generic landmarks
+        return findRecent(q)
+    }
+
+    /**
+     * Format timestamp into natural language time description.
+     */
+    fun formatTimeAgo(timestampMs: Long): String {
+        val elapsedSec = (System.currentTimeMillis() - timestampMs) / 1000
+        val elapsedMin = elapsedSec / 60
+        return when {
+            elapsedMin < 1 -> "just now"
+            elapsedMin == 1L -> "about 1 minute ago"
+            elapsedMin < 60 -> "about $elapsedMin minutes ago"
+            else -> "earlier today"
+        }
+    }
 
     /**
      * Store a detected landmark (elevator, door, exit, etc.)
@@ -110,6 +178,7 @@ class SpatialMemory(context: Context) {
     fun clear() {
         memoryMap.clear()
         roomMemory.clear()
+        placeMemory.clear()
     }
 
     /**
@@ -118,6 +187,7 @@ class SpatialMemory(context: Context) {
     fun toDebugString(): String = buildString {
         append("SpatialMemory:\n")
         append("  Rooms: ${roomMemory.keys.joinToString(", ")}\n")
+        append("  Places: ${placeMemory.keys.joinToString(", ")}\n")
         append("  Landmarks: ${memoryMap.keys.joinToString(", ")}\n")
     }
 

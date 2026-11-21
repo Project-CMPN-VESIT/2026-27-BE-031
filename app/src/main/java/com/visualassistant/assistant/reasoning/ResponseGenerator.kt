@@ -42,6 +42,7 @@ class ResponseGenerator {
             is UserIntent.GuideToElevator -> "Searching for the elevator. ${findObject("elevator", world, memory)}"
             is UserIntent.GuideToRoom -> guideToRoom(intent.roomNumber, world, memory)
             is UserIntent.GuideTo -> "Looking for ${intent.label}. ${findObject(intent.label, world, memory)}"
+            is UserIntent.NavigateTo -> "Looking up walking route to ${intent.destination}..."
             is UserIntent.StartWalkingMode -> "Walking mode started. I'll alert you to obstacles and important objects."
             is UserIntent.Stop -> "Stopping. Let me know if you need anything."
             is UserIntent.RememberCurrentLocation -> "I'll remember your current location."
@@ -60,60 +61,77 @@ class ResponseGenerator {
 
     /**
      * Generate a proactive narration (not triggered by user) for exploration mode.
+     * Prioritizes the single most critical obstacle ahead, eliminating speech spam.
      * Returns null if nothing important enough to say.
      */
     fun generateProactiveNarration(
         importantEvents: List<Pair<TrackedObject, Priority>>,
         hazards: List<HazardEvent>,
-        world: WorldModel
+        world: WorldModel,
+        isUserMoving: Boolean = world.isUserMoving
     ): String? {
         if (hazards.isNotEmpty()) {
             // Hazards take absolute precedence
             val topHazard = hazards.maxByOrNull { it.type.priority }!!
-            return generateHazardWarning(topHazard, world)
+            return generateHazardWarning(topHazard, world, isUserMoving)
         }
 
         if (importantEvents.isEmpty()) return null
 
-        val parts = mutableListOf<String>()
-
-        // Check for obstacles in path first
-        val pathObstacles = importantEvents.filter { (obj, _) -> obj.isInPath }
-        if (pathObstacles.isNotEmpty()) {
-            val top = pathObstacles.first()
-            parts.add(describeObjectBriefly(top.first, pathContext = true))
+        // Priority 1: Path obstacles ahead
+        val pathObstacle = importantEvents.firstOrNull { (obj, _) -> obj.isInPath }?.first
+        if (pathObstacle != null) {
+            return describeObjectBriefly(pathObstacle, pathContext = true, isUserMoving = isUserMoving)
         }
 
-        // Then approaching objects
-        val approaching = importantEvents.filter { (obj, priority) ->
+        // Priority 2: Approaching objects
+        val approaching = importantEvents.firstOrNull { (obj, priority) ->
             obj.isApproaching && priority.value >= Priority.HIGH.value
-        }
-        approaching.take(1).forEach { (obj, _) ->
-            if (!obj.isInPath) {  // already covered by path obstacles
-                parts.add("A ${obj.label} is approaching from ${obj.position.toDescription()}")
+        }?.first
+        if (approaching != null) {
+            val posDesc = approaching.position.toDescription()
+            return if (approaching.label == "person") {
+                if (isUserMoving) "A person is approaching directly ahead, please step aside"
+                else "A person is approaching from $posDesc"
+            } else {
+                "A ${displayLabel(approaching.label)} is approaching from $posDesc"
             }
         }
 
-        // Then navigation targets (door, stairs, elevator) if HIGH+
-        val navTargets = importantEvents.filter { (obj, priority) ->
-            priority.value >= Priority.HIGH.value && obj.label in setOf("door", "stairs", "elevator", "exit")
-            && !obj.isInPath   // path obstacles already covered
-        }
-        navTargets.take(1).forEach { (obj, _) ->
-            parts.add(describeObjectBriefly(obj, pathContext = false))
+        // Priority 3: Close navigation targets (door, stairs, elevator)
+        val navTarget = importantEvents.firstOrNull { (obj, priority) ->
+            priority.value >= Priority.HIGH.value &&
+            obj.label in setOf("door", "stairs", "elevator", "exit") &&
+            obj.distanceCategory != DistanceCategory.FAR
+        }?.first
+        if (navTarget != null) {
+            return describeObjectBriefly(navTarget, pathContext = false, isUserMoving = isUserMoving)
         }
 
-        if (parts.isEmpty()) return null
-        return parts.joinToString(". ") + "."
+        // Priority 4: Any close object directly ahead in view
+        val aheadObj = importantEvents.firstOrNull { (obj, _) ->
+            obj.position == SpatialPosition.CENTER &&
+            (obj.distanceCategory == DistanceCategory.VERY_CLOSE || obj.distanceCategory == DistanceCategory.CLOSE)
+        }?.first
+        if (aheadObj != null) {
+            return describeObjectBriefly(aheadObj, pathContext = false, isUserMoving = isUserMoving)
+        }
+
+        return null
     }
 
     /**
      * Generate hazard warning with actionable safety guidance.
      *
      * For life-safety hazards (FIRE, SHARP_OBJECT): speak the label clearly, once, no extra instructions.
-     * For path obstacles (OBSTACLE_IN_PATH): suggest left/right if available.
+     * If user is idle/stationary: speak the warning without evasion directions.
+     * If user is walking/moving: suggest left/right avoidance if in path.
      */
-    fun generateHazardWarning(hazard: HazardEvent, world: WorldModel): String {
+    fun generateHazardWarning(
+        hazard: HazardEvent,
+        world: WorldModel,
+        isUserMoving: Boolean = world.isUserMoving
+    ): String {
         val baseText = hazard.toSpeechText()
 
         // Critical life-safety hazards: just the clear label, no directions appended
@@ -124,7 +142,12 @@ class ResponseGenerator {
 
         if (!hazard.isInPath) return baseText
 
-        // For path obstacles, suggest a safe direction
+        // If the user is idle/stationary, do NOT give evasion directions; just state the obstacle
+        if (!isUserMoving) {
+            return baseText
+        }
+
+        // For path obstacles while walking, suggest a safe direction
         val isLeftClear = world.objectsOnLeft.none { it.distanceCategory == DistanceCategory.VERY_CLOSE }
         val isRightClear = world.objectsOnRight.none { it.distanceCategory == DistanceCategory.VERY_CLOSE }
 
@@ -239,10 +262,19 @@ class ResponseGenerator {
             return "Yes. There is a $display$surfaceStr ${found.position.toDescription()}, ${found.lastDetectedObject.distanceDescription}."
         }
 
+        // Check spatial memory for landmark/place/room
+        val placeEntry = memory.findPlace(label)
+        if (placeEntry != null) {
+            val timeAgo = memory.formatTimeAgo(placeEntry.timestampMs)
+            val placeName = placeEntry.text ?: label
+            return "I don't see $placeName in front of you right now, but you passed it ${placeEntry.relativePosition} $timeAgo."
+        }
+
         // Check memory
         val memEntry = memory.findRecent(label)
         if (memEntry != null) {
-            return "I previously detected a $label ${memEntry.relativePosition}. I can't currently see it from this direction."
+            val timeAgo = memory.formatTimeAgo(memEntry.timestampMs)
+            return "I previously detected a $label ${memEntry.relativePosition} $timeAgo. I can't currently see it from this direction."
         }
 
         return "I can't currently see a $label from this direction."
@@ -277,7 +309,8 @@ class ResponseGenerator {
         // Check memory
         val memEntry = memory.findRoom(roomNumber)
         if (memEntry != null) {
-            return "Room $roomNumber was previously detected ${memEntry.relativePosition}. I'll keep searching."
+            val timeAgo = memory.formatTimeAgo(memEntry.timestampMs)
+            return "Room $roomNumber was detected ${memEntry.relativePosition} $timeAgo. I'll keep searching as you walk."
         }
         return "Searching for Room $roomNumber. I'll let you know when I spot it. Walk slowly and I'll guide you."
     }
@@ -288,23 +321,46 @@ class ResponseGenerator {
             val roomNum = roomMatch.groupValues[1]
             val entry = memory.findRoom(roomNum)
             return if (entry != null) {
-                "Room $roomNum was previously detected ${entry.relativePosition}."
+                val timeAgo = memory.formatTimeAgo(entry.timestampMs)
+                "Room $roomNum was detected ${entry.relativePosition} $timeAgo."
             } else {
-                "I don't have Room $roomNum in my memory. I'll look out for it."
+                "I don't have Room $roomNum in my memory. I'll look out for it as you walk."
             }
         }
 
+        // Clean query prefixes to extract target keyword
+        val cleanQuery = query.lowercase()
+            .removePrefix("where did i see the ")
+            .removePrefix("where did i see ")
+            .removePrefix("where was the ")
+            .removePrefix("where was ")
+            .removePrefix("where is the ")
+            .removePrefix("where is ")
+            .removePrefix("have you seen the ")
+            .removePrefix("have you seen ")
+            .trim()
+
+        val placeEntry = memory.findPlace(cleanQuery)
+        if (placeEntry != null) {
+            val timeAgo = memory.formatTimeAgo(placeEntry.timestampMs)
+            val placeName = placeEntry.text ?: cleanQuery
+            return "$placeName was detected ${placeEntry.relativePosition} $timeAgo."
+        }
+
         // Generic memory query
-        val keywords = listOf("elevator", "door", "exit", "reception", "cafeteria", "library")
+        val keywords = listOf("elevator", "door", "exit", "reception", "cafeteria", "library", "restroom", "office", "stairs")
         for (kw in keywords) {
             if (query.contains(kw)) {
-                val entry = memory.findRecent(kw)
+                val entry = memory.findPlace(kw) ?: memory.findRecent(kw)
                 if (entry != null) {
-                    return "I previously detected a $kw ${entry.relativePosition}."
+                    val timeAgo = memory.formatTimeAgo(entry.timestampMs)
+                    return "I detected $kw ${entry.relativePosition} $timeAgo."
+                } else {
+                    return "I haven't seen $kw recently. I will watch for it."
                 }
             }
         }
-        return "I don't have that information in my memory."
+        return "I don't have that in memory yet. As you walk past signs or rooms, I'll remember them."
     }
 
     private fun handleUnknown(rawText: String, world: WorldModel): String {
@@ -312,21 +368,38 @@ class ResponseGenerator {
                 "read a sign, or say 'start walking mode'."
     }
 
-    private fun describeObjectBriefly(obj: TrackedObject, pathContext: Boolean): String {
-        val label = obj.label
+    private fun describeObjectBriefly(
+        obj: TrackedObject,
+        pathContext: Boolean,
+        isUserMoving: Boolean = false
+    ): String {
+        val label = displayLabel(obj.label)
         val pos = obj.position.toDescription()
         val dist = obj.lastDetectedObject.distanceDescription
 
         return when {
-            label == "stairs" && pathContext -> "Caution. Stairs ahead $pos"
-            label == "stairs" -> "Stairs are $pos"
-            label == "person" && obj.isApproaching -> "A person approaching from $pos"
-            label == "person" -> "A person is $pos, $dist"
-            label in setOf("door", "doorway") -> "There is a door $pos, $dist"
-            label == "elevator" -> "An elevator is $pos"
-            obj.isInPath && obj.distanceCategory == DistanceCategory.VERY_CLOSE ->
-                "Caution. ${label.replaceFirstChar { it.uppercase() }} very close $pos"
-            else -> "A $label is $pos"
+            label == "stairs" && pathContext -> {
+                if (isUserMoving) "Caution. Stairs ahead, proceed with care"
+                else "Stairs ahead"
+            }
+            label == "stairs" -> "Stairs $pos"
+            label == "person" && obj.isApproaching -> "A person is approaching from $pos"
+            label == "person" -> {
+                if (obj.isInPath && isUserMoving) "Person ahead, move slightly to the side"
+                else if (obj.isInPath) "A person is ahead, $dist"
+                else "A person is $pos, $dist"
+            }
+            label in setOf("door", "doorway") -> "Door $pos, $dist"
+            label == "elevator" -> "Elevator $pos"
+            obj.isInPath && obj.distanceCategory == DistanceCategory.VERY_CLOSE -> {
+                if (isUserMoving) "Caution. $label directly ahead, move slightly to either side"
+                else "$label directly ahead"
+            }
+            obj.isInPath -> {
+                if (isUserMoving) "$label ahead in path, move slightly left or right"
+                else "$label ahead"
+            }
+            else -> "$label $pos"
         }
     }
 
@@ -347,7 +420,7 @@ class ResponseGenerator {
 
             val boxS = other.lastDetectedObject.boundingBox
             val horizontalOverlap = maxOf(0f, minOf(boxA.right, boxS.right) - maxOf(boxA.left, boxS.left))
-            val verticalOverlap = maxOf0(00f, minOf(boxA.bottom, boxS.bottom) - maxOf(boxA.top, boxS.top))
+            val verticalOverlap = maxOf(0f, minOf(boxA.bottom, boxS.bottom) - maxOf(boxA.top, boxS.top))
 
             val overlaps = (horizontalOverlap > 0.1f * boxA.width() && verticalOverlap > 0f) ||
                     boxS.contains(boxA.centerX(), boxA.centerY()) ||

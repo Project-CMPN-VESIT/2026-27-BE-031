@@ -56,8 +56,12 @@ class CameraManager(
             .build()
             .also { it.setSurfaceProvider(previewView.surfaceProvider) }
 
-        // Image Analysis use case — RGBA_8888 output for easy Bitmap conversion
+        // Image Analysis use case — RGBA_8888 output for easy Bitmap conversion.
+        // 1280×720 gives the model more detail than the CameraX default (~480p).
+        // STRATEGY_KEEP_ONLY_LATEST drops frames we can't process fast enough —
+        // exactly what we want for a real-time analysis pipeline.
         val imageAnalysis = ImageAnalysis.Builder()
+            .setTargetResolution(android.util.Size(1280, 720))
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
             .build()

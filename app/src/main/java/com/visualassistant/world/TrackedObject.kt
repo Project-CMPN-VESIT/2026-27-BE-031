@@ -60,7 +60,9 @@ data class TrackedObject(
     /**
      * Whether this object is in the walking path.
      */
-    val isInPath: Boolean get() = lastDetectedObject.isInPath
+    val isInPath: Boolean get() = (position == SpatialPosition.CENTER &&
+            distanceCategory != DistanceCategory.VERY_FAR &&
+            distanceCategory != DistanceCategory.FAR) || lastDetectedObject.isInPath
 
     /**
      * Unique key for cooldown tracking (type + position bucket).

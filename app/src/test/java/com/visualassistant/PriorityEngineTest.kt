@@ -32,8 +32,8 @@ class PriorityEngineTest {
             id = 0, label = label, position = position,
             distanceCategory = distanceCategory, confidence = 0.9f,
             lastDetectedObject = det,
-            previousNormalizedArea = if (isApproaching) 0.1f else normalizedHeight * 0.2f,
-            currentNormalizedArea = normalizedHeight * 0.2f,
+            previousNormalizedArea = if (isApproaching) 0.01f else normalizedHeight * 0.2f,
+            currentNormalizedArea = if (isApproaching) 0.05f else normalizedHeight * 0.2f,
             framesTracked = if (isApproaching) 5 else 1
         )
     }

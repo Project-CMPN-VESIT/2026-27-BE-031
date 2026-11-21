@@ -70,6 +70,14 @@ class AssistantEngine(
 
     var onCloudDescriptionRequested: (() -> Unit)? = null
     var onCloudFindRequested: ((String) -> Unit)? = null
+    var onNavigateRequested: ((String) -> Unit)? = null
+
+    // Proactive narration throttling & scene change tracking
+    private var lastProactiveNarrationMs: Long = 0L
+    private var lastAnnouncedLabel: String = ""
+    private var lastAnnouncedPosition: com.visualassistant.world.SpatialPosition? = null
+    private var lastAnnouncedDistance: com.visualassistant.perception.object_detection.DistanceCategory? = null
+    private var lastSameObjectAnnouncedMs: Long = 0L
 
     /**
      * Called when the user speaks a command.
@@ -86,13 +94,31 @@ class AssistantEngine(
         // Handle task-setting intents
         updateTaskFromIntent(intent)
 
-        // Handle FindObject intent with Cloud Fallback when offline model misses it
+        // Handle NavigateTo intent via Maps service
+        if (intent is UserIntent.NavigateTo) {
+            ttsManager.speakNow("Finding walking route to ${intent.destination}...")
+            onNavigateRequested?.invoke(intent.destination)
+            return
+        }
+
+        // Handle FindObject intent with Spatial Memory and Cloud Fallback
         if (intent is UserIntent.FindObject) {
             val found = currentWorldModel.findFirst(intent.label)
             if (found != null) {
                 val resp = responseGenerator.findObject(intent.label, currentWorldModel, spatialMemory)
                 ttsManager.speakNow(resp)
             } else {
+                // Check spatial memory first before bothering cloud
+                val placeEntry = spatialMemory.findPlace(intent.label)
+                if (placeEntry != null) {
+                    val timeAgo = spatialMemory.formatTimeAgo(placeEntry.timestampMs)
+                    val placeName = placeEntry.text ?: intent.label
+                    val resp = "I don't see $placeName in front of you right now, but you passed it ${placeEntry.relativePosition} $timeAgo."
+                    ttsManager.speakNow(resp)
+                    updateContextFromResponse(intent, currentWorldModel)
+                    return
+                }
+
                 // If cloud vision is configured, ask Gemini to locate it in the current view
                 if (onCloudFindRequested != null) {
                     ttsManager.speakNow("Searching for ${intent.label}...")
@@ -153,6 +179,8 @@ class AssistantEngine(
 
         if (isListening) return // Do not proactive announce while listening to user
 
+        var hazardAnnouncedThisCycle = false
+
         // Step 1: Check for hazards first (always highest priority)
         if (hazards.isNotEmpty()) {
             val topHazard = hazards.maxByOrNull { it.type.priority }!!
@@ -175,8 +203,12 @@ class AssistantEngine(
                     )
                 )
                 markAnnounced(key)
+                hazardAnnouncedThisCycle = true
             }
         }
+
+        // If a hazard was just announced, suppress proactive exploration speech in this frame
+        if (hazardAnnouncedThisCycle) return
 
         // Step 2: Task-based guidance
         if (taskManager.hasActiveTask && taskManager.currentTask !is NavigationTask.ExploreMode) {
@@ -254,22 +286,55 @@ class AssistantEngine(
     }
 
     /**
-     * Handle proactive narration in exploration mode.
+     * Handle proactive narration in exploration mode with strict anti-spam controls.
      */
     private fun handleExplorationMode(world: WorldModel, hazards: List<HazardEvent>) {
-        // Get high-priority events sorted by importance
+        val now = System.currentTimeMillis()
+
+        // 1. Enforce minimum global quiet period between proactive narrations (12s)
+        if (now - lastProactiveNarrationMs < com.visualassistant.utils.Constants.PROACTIVE_NARRATION_INTERVAL_MS) {
+            return
+        }
+
+        // 2. Filter and prioritize high-priority events
         val prioritized = priorityEngine.filterAndSortForAnnouncement(
             world.trackedObjects,
             taskManager.currentTask,
             minimumPriority = Priority.HIGH  // Only HIGH+ events get proactive narration in exploration
         )
 
+        // Find primary object for scene change comparison
+        val primaryObj = prioritized.firstOrNull { it.first.isInPath }?.first
+            ?: prioritized.firstOrNull { it.first.isApproaching }?.first
+            ?: prioritized.firstOrNull()?.first
+
+        if (primaryObj != null) {
+            val isSameObject = primaryObj.label.equals(lastAnnouncedLabel, ignoreCase = true) &&
+                    primaryObj.position == lastAnnouncedPosition &&
+                    primaryObj.distanceCategory == lastAnnouncedDistance
+
+            // If user is looking at the same stationary object, suppress speech until 30s reminder
+            if (isSameObject && (now - lastSameObjectAnnouncedMs < com.visualassistant.utils.Constants.PROACTIVE_REPEAT_SAME_OBJECT_MS)) {
+                return
+            }
+        }
+
         val narration = responseGenerator.generateProactiveNarration(prioritized, hazards, world)
         if (narration != null) {
-            val key = "exploration_narration_${narration.take(20)}"
-            if (canAnnounce(key, 10_000L)) {
-                ttsManager.speak(narration, Priority.HIGH, key, 10_000L)
+            val key = if (primaryObj != null) "proactive_${primaryObj.label}_${primaryObj.position.name}"
+                      else "exploration_narration"
+
+            if (canAnnounce(key, com.visualassistant.utils.Constants.PROACTIVE_NARRATION_INTERVAL_MS)) {
+                ttsManager.speak(narration, Priority.HIGH, key, com.visualassistant.utils.Constants.PROACTIVE_NARRATION_INTERVAL_MS)
                 markAnnounced(key)
+                lastProactiveNarrationMs = now
+
+                if (primaryObj != null) {
+                    lastAnnouncedLabel = primaryObj.label
+                    lastAnnouncedPosition = primaryObj.position
+                    lastAnnouncedDistance = primaryObj.distanceCategory
+                    lastSameObjectAnnouncedMs = now
+                }
             }
         }
     }
